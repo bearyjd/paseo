@@ -399,6 +399,25 @@ export interface PluginTimelineItem {
   data: JsonValue;
 }
 
+export interface ProviderSwitchContextSummary {
+  includedItems: number;
+  truncated: boolean;
+  charCount: number;
+  budgetChars: number;
+  omittedReasons?: string[];
+}
+
+export interface ProviderSwitchTimelineItem {
+  type: "provider_switch";
+  fromProvider: AgentProvider;
+  toProvider: AgentProvider;
+  fromModel?: string | null;
+  toModel?: string | null;
+  fromSessionId?: string | null;
+  toSessionId?: string | null;
+  context: ProviderSwitchContextSummary;
+}
+
 export interface AgentTaskItem {
   text: string;
   completed: boolean;
@@ -420,7 +439,8 @@ export type AgentTimelineItem =
       message: string;
     }
   | CompactionTimelineItem
-  | PluginTimelineItem;
+  | PluginTimelineItem
+  | ProviderSwitchTimelineItem;
 
 export type AgentStreamEvent =
   | { type: "thread_started"; sessionId: string; provider: AgentProvider }
