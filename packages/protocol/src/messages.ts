@@ -2196,6 +2196,7 @@ export const SetAgentModeRequestMessageSchema = z.object({
   type: z.literal("set_agent_mode_request"),
   agentId: z.string(),
   modeId: z.string(),
+  expectedProvider: AgentProviderSchema.optional(),
   requestId: z.string(),
 });
 
@@ -2216,6 +2217,7 @@ export const SetAgentModelRequestMessageSchema = z.object({
   type: z.literal("set_agent_model_request"),
   agentId: z.string(),
   modelId: z.string().nullable(),
+  expectedProvider: AgentProviderSchema.optional(),
   requestId: z.string(),
 });
 
@@ -2228,6 +2230,7 @@ export const SetAgentThinkingRequestMessageSchema = z.object({
   type: z.literal("set_agent_thinking_request"),
   agentId: z.string(),
   thinkingOptionId: z.string().nullable(),
+  expectedProvider: AgentProviderSchema.optional(),
   requestId: z.string(),
 });
 
@@ -2241,6 +2244,7 @@ export const SetAgentFeatureRequestMessageSchema = z.object({
   agentId: z.string(),
   featureId: z.string(),
   value: z.unknown(),
+  expectedProvider: AgentProviderSchema.optional(),
   requestId: z.string(),
 });
 
@@ -2276,6 +2280,7 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
   type: z.literal("agent.config.apply.request"),
   agentId: z.string(),
   config: AgentConfigApplySchema,
+  expectedProvider: AgentProviderSchema.optional(),
   requestId: z.string(),
 });
 
