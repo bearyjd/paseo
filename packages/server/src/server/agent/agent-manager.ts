@@ -231,7 +231,6 @@ export interface SwitchAgentProviderInput {
   providerOptions?: ProviderOptions | null;
   prompt: AgentPromptInput;
   messageId: string;
-  beforeDispatch?: () => Promise<void>;
 }
 
 export interface SwitchAgentProviderResult {
@@ -2461,7 +2460,6 @@ export class AgentManager {
 
       await this.closeLiveSessionForSwitch(existingLive, agentId);
       this.assertAcceptingAgentRegistrations();
-      await input.beforeDispatch?.();
 
       const markerItem: ProviderSwitchTimelineItem = {
         type: "provider_switch",

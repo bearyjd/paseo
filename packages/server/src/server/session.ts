@@ -9284,7 +9284,6 @@ export class Session {
           providerOptions: msg.providerOptions,
           prompt,
           messageId: msg.messageId,
-          beforeDispatch,
         });
         const stored = await this.agentStorage.get(agentId);
         if (stored && !stored.title && !stored.lastUserMessageAt) {
@@ -9292,6 +9291,7 @@ export class Session {
           if (provisionalTitle) await this.agentManager.setTitle(agentId, provisionalTitle);
         }
         try {
+          await beforeDispatch();
           const dispatchResult = await startAgentRun(
             this.agentManager,
             agentId,
