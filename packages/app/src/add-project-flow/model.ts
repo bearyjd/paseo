@@ -225,10 +225,11 @@ export interface AddProjectKeyInput {
 export type AddProjectKeyCommand =
   | { kind: "tab"; tab: AddProjectTab }
   | { kind: "move"; direction: "next" | "previous" }
+  | { kind: "complete" }
   | { kind: "submit" };
 
 /** Keys the sheet claims besides Escape. Digits only act with the platform's Mod key. */
-export const ADD_PROJECT_KEYS = ["Enter", "ArrowUp", "ArrowDown", "1", "2", "3"] as const;
+export const ADD_PROJECT_KEYS = ["Enter", "Tab", "ArrowUp", "ArrowDown", "1", "2", "3"] as const;
 
 export function resolveAddProjectKey(
   input: AddProjectKeyInput,
@@ -245,6 +246,7 @@ export function resolveAddProjectKey(
   if (!plain) return null;
   if (input.key === "ArrowDown") return { kind: "move", direction: "next" };
   if (input.key === "ArrowUp") return { kind: "move", direction: "previous" };
+  if (input.key === "Tab") return { kind: "complete" };
   if (input.key === "Enter") return { kind: "submit" };
   return null;
 }

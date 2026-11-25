@@ -40,6 +40,7 @@ export function useNewFolderTab(input: {
       location,
       destination: previewName ? joinDirectoryPath(location, previewName) : location,
       unavailable: canCreate ? null : "Update the host to create folders",
+      completion: null,
       nameError,
       primary: {
         label: "Create project",

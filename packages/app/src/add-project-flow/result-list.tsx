@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, type ComponentType, type RefObject } from "react";
-import { Check } from "lucide-react-native";
+import { Check, ChevronRight } from "lucide-react-native";
 import { Text, View, type ScrollView as NativeScrollView } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { PressHighlight } from "@/components/ui/press-highlight";
 import { ScrollView } from "@/components/ui/scroll-view";
@@ -18,6 +19,8 @@ export interface ResultRow {
   title: string;
   subtitle: string | null;
   icon: RowIcon;
+  /** A folder the list can open to show what is inside it. */
+  openable?: boolean;
   testID: string;
 }
 
@@ -33,6 +36,8 @@ interface ResultListProps {
   /** Shown in place of the rows when there are none, or above them for an error. */
   notice: ResultListNotice | null;
   onSelect: (index: number) => void;
+  /** Opens an openable row in place; rows show a chevron for it. */
+  onOpen?: (index: number) => void;
   disabled?: boolean;
   testID: string;
 }
@@ -67,6 +72,7 @@ function ResultRowView({
   activeItemRef,
   onActiveLayout,
   onSelect,
+  onOpen,
 }: {
   row: ResultRow;
   index: number;
@@ -75,7 +81,9 @@ function ResultRowView({
   activeItemRef: RefObject<View | null>;
   onActiveLayout: () => void;
   onSelect: (index: number) => void;
+  onOpen?: (index: number) => void;
 }) {
+  const handleOpen = useCallback(() => onOpen?.(index), [index, onOpen]);
   const handlePress = useCallback(() => onSelect(index), [index, onSelect]);
   const style = useMemo(
     () => [
@@ -116,6 +124,17 @@ function ResultRowView({
       </View>
       {/* Reserved on every row so the active row's mark never shifts its text. */}
       <View style={styles.trailingSlot}>{active ? <ActiveMark /> : null}</View>
+      {row.openable && onOpen ? (
+        <ToolbarButton
+          label={`Open ${row.title}`}
+          onPress={handleOpen}
+          disabled={disabled}
+          compact
+          testID={`${row.testID}-open`}
+        >
+          <MutedRowGlyph icon={ChevronRight} size={16} />
+        </ToolbarButton>
+      ) : null}
     </PressHighlight>
   );
 }
@@ -129,6 +148,7 @@ export function ResultList({
   activeIndex,
   notice,
   onSelect,
+  onOpen,
   disabled = false,
   testID,
 }: ResultListProps) {
@@ -173,6 +193,7 @@ export function ResultList({
                   activeItemRef={activeItemRef}
                   onActiveLayout={onItemLayout}
                   onSelect={onSelect}
+                  onOpen={onOpen}
                 />
               ))}
             </View>

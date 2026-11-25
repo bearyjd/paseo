@@ -186,6 +186,11 @@ describe("Add Project keys", () => {
     expect(resolveAddProjectKey({ ...KEY, key: "Enter" }, true)).toEqual({ kind: "submit" });
     expect(resolveAddProjectKey({ ...KEY, key: "Enter", shiftKey: true }, true)).toBeNull();
   });
+
+  it("maps a plain Tab to completion and leaves Shift+Tab to focus", () => {
+    expect(resolveAddProjectKey({ ...KEY, key: "Tab" }, true)).toEqual({ kind: "complete" });
+    expect(resolveAddProjectKey({ ...KEY, key: "Tab", shiftKey: true }, true)).toBeNull();
+  });
 });
 
 describe("Add Project options", () => {

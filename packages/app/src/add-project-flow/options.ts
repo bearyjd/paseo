@@ -11,6 +11,12 @@ export function pathBaseName(path: string): string {
   return parts[parts.length - 1] ?? trimmed;
 }
 
+/** The search text that lists the contents of `path`: the path with one trailing separator. */
+export function directoryQueryFor(path: string): string {
+  if (/[\\/]$/.test(path)) return path;
+  return `${path}${path.includes("\\") && !path.includes("/") ? "\\" : "/"}`;
+}
+
 /** Starts the id of every choice built from what the user typed. */
 export const MANUAL_CHOICE_PREFIX = "manual:";
 

@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, type Ref } from "react";
 import { View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Folder, FolderOpen, Search } from "lucide-react-native";
+import type { EditingTextInputHandle } from "@/components/ui/text-input";
 import { buildProjectPickerOptions } from "@/components/project-picker-options";
 import { Button } from "@/components/ui/button";
 import { FormTextInput } from "@/components/ui/form-field";
@@ -10,7 +11,7 @@ import { ICON_SIZE, type Theme } from "@/styles/theme";
 import { shortenPath } from "@/utils/shorten-path";
 import type { AddProjectActions } from "./use-add-project-actions";
 import type { AddProjectFlowState, AddProjectHost } from "./model";
-import { pathBaseName } from "./options";
+import { directoryQueryFor, pathBaseName } from "./options";
 import { ResultList, type ResultRow } from "./result-list";
 import { RESULTS_TEST_ID } from "./result-list-id";
 import { useDirectorySearch } from "./searches";
@@ -52,6 +53,7 @@ export function useExistingTab(input: {
           title: option.kind === "path" ? shortPath : pathBaseName(option.path),
           subtitle: option.kind === "path" ? "Open this path" : shortPath,
           icon: Folder,
+          openable: option.kind === "suggestion",
           testID: `add-project-flow-folder-${encodeURIComponent(option.path)}`,
         };
       }),
@@ -63,6 +65,14 @@ export function useExistingTab(input: {
     search.pending && state.existing.selectedId === null && paths[0]?.kind !== "path";
   const activeIndex = awaitingRows ? -1 : resolveActiveIndex(rows, state.existing.selectedId);
   const activePath = paths[activeIndex]?.path ?? null;
+  // Tab completes to the active folder, or to the first folder when the typed path is active.
+  const completionPath =
+    awaitingRows || !query.trim()
+      ? null
+      : ((paths[activeIndex]?.kind === "suggestion" ? paths[activeIndex] : undefined)?.path ??
+        paths.find((option) => option.kind === "suggestion")?.path ??
+        null);
+  const completion = completionPath ? directoryQueryFor(completionPath) : null;
 
   return useMemo<AddProjectTabView>(() => {
     const unavailable = canAddProject ? null : "Update the host to add projects";
@@ -76,32 +86,48 @@ export function useExistingTab(input: {
       activeIndex,
       notice,
       unavailable,
+      completion,
       primary: {
         label: "Open project",
         submit: activePath ? () => actions.openFolder(activePath) : null,
       },
     };
-  }, [actions, activeIndex, activePath, canAddProject, query, rows, search.error, search.pending]);
+  }, [
+    actions,
+    activeIndex,
+    activePath,
+    canAddProject,
+    completion,
+    query,
+    rows,
+    search.error,
+    search.pending,
+  ]);
 }
 
 export function ExistingTab({
   view,
   query,
+  inputRef,
   canBrowse,
   disabled,
   autoFocus,
   onQueryChange,
   onSelectRow,
+  onOpenRow,
   onBrowse,
 }: {
   view: AddProjectTabView;
   query: string;
+  inputRef: Ref<EditingTextInputHandle>;
   canBrowse: boolean;
   disabled: boolean;
   /** Focus the field on mount; only with a hardware keyboard, so touch keeps the list in view. */
   autoFocus: boolean;
   onQueryChange: (query: string) => void;
   onSelectRow: (index: number) => void;
+  /** Lists the contents of the folder at `index` in place of the current results. */
+  onOpenRow: (index: number) => void;
   onBrowse: () => void;
 }) {
   const editable = !disabled && !view.unavailable;
@@ -110,11 +136,12 @@ export function ExistingTab({
       <View style={styles.searchRow}>
         <View style={styles.searchField}>
           <FormTextInput
+            ref={inputRef}
             initialValue={query}
             onChangeText={onQueryChange}
             onSubmitEditing={isWeb ? undefined : (view.primary.submit ?? undefined)}
             leading={searchIcon}
-            placeholder="Search folders or enter a path"
+            placeholder="Search folders or enter a path (Tab completes)"
             accessibilityLabel="Search folders"
             autoFocus={autoFocus}
             autoCapitalize="none"
@@ -141,6 +168,7 @@ export function ExistingTab({
         activeIndex={view.activeIndex}
         notice={view.notice}
         onSelect={onSelectRow}
+        onOpen={onOpenRow}
         disabled={disabled}
         testID={RESULTS_TEST_ID}
       />

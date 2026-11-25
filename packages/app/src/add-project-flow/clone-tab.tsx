@@ -113,6 +113,7 @@ export function useCloneTab(input: {
       activeIndex,
       notice,
       unavailable,
+      completion: null,
       location,
       destination,
       primary: {

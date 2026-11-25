@@ -9,6 +9,8 @@ export interface AddProjectTabView {
   notice: ResultListNotice | null;
   /** Why this host cannot do what the tab offers; the tab's fields are read-only while set. */
   unavailable: string | null;
+  /** What Tab types into the search field, or null when there is nothing to complete. */
+  completion: string | null;
   primary: {
     label: string;
     /** Absent when there is nothing to commit yet. */

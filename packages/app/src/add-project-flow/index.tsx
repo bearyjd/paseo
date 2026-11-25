@@ -39,11 +39,13 @@ import {
   setAddProjectLocation,
   setAddProjectQuery,
   setNewFolderName,
+  type AddProjectHost,
   type AddProjectTab,
 } from "./model";
 import { NewFolderTab, useNewFolderTab } from "./new-folder-tab";
 import { defaultProjectLocation } from "./options";
 import type { AddProjectTabView } from "./tab-view";
+import { useExistingQueryInput } from "./use-existing-query-input";
 import { useAddProjectActions } from "./use-add-project-actions";
 import { useAddProjectHosts } from "./use-add-project-hosts";
 
@@ -185,6 +187,9 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     const row = viewRef.current.rows[index];
     if (row) setState((current) => selectAddProjectRow(current, row.id));
   }, []);
+  const queryInput = useExistingQueryInput({ rows: existing.rows, changeQuery });
+  // The host's own dialog where it has one; otherwise the list starts at the home folder.
+  const browseHost = pickBrowse(host, actions.browse, queryInput.browseHome);
   const keyboard = useMemo<SheetKeyboard>(
     () => ({
       keys: ADD_PROJECT_KEYS,
@@ -205,12 +210,15 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
           );
           return true;
         }
+        if (command.kind === "complete") {
+          return queryInput.complete(current.completion);
+        }
         if (!current.primary.submit || focusedControlOwnsEnter()) return false;
         current.primary.submit();
         return true;
       },
     }),
-    [isMac, selectRow, selectTab],
+    [isMac, queryInput, selectRow, selectTab],
   );
 
   const lockedTab = submitting ? state.tab : null;
@@ -268,12 +276,14 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       <ExistingTab
         view={existing}
         query={state.existing.query}
-        canBrowse={host.canBrowse && !offline}
+        inputRef={queryInput.inputRef}
+        canBrowse={host.canAddProject && !offline}
         disabled={submitting}
         autoFocus={keyboardPresent}
         onQueryChange={changeQuery}
         onSelectRow={selectRow}
-        onBrowse={actions.browse}
+        onOpenRow={queryInput.openRow}
+        onBrowse={browseHost}
       />
     );
   } else if (state.tab === "clone") {
@@ -334,6 +344,10 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       </View>
     </AdaptiveModalSheet>
   );
+}
+
+function pickBrowse(host: AddProjectHost | null, dialog: () => void, inline: () => void) {
+  return host?.canBrowse ? dialog : inline;
 }
 
 function blockSubmitWhen<TabView extends AddProjectTabView>(
