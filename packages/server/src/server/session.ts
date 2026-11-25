@@ -1190,7 +1190,8 @@ export class Session {
         emit: (msg) => this.emit(msg),
       },
       operations: {
-        ensureLoaded: async (agentId) => {
+        ensureLoaded: async (agentId, mutationOptions) => {
+          agentManager.assertSettingsMutationAllowedDuringSwitch(agentId, mutationOptions);
           await ensureUnarchivedAgentLoaded(agentId, {
             agentManager,
             agentStorage,
