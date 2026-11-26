@@ -1,6 +1,7 @@
 import { compare, hashSync } from "bcryptjs";
 import { timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
+import type { AdmissionProvider } from "./authorization/admission-provider.js";
 import { matchesLocalCredential } from "./local-credential.js";
 
 export const DAEMON_PASSWORD_BCRYPT_COST = 12;
@@ -8,6 +9,11 @@ export const DAEMON_PASSWORD_BCRYPT_COST = 12;
 export interface DaemonAuthConfig {
   password?: string;
   localCredential?: () => string | null;
+  /**
+   * Multi-user admission. When set, `password` is the operator-only secret for HTTP and MCP
+   * surfaces and no longer admits WebSocket sessions. See authorization/admission-provider.ts.
+   */
+  admissionProvider?: AdmissionProvider;
 }
 
 export interface BearerAuthRejectContext {

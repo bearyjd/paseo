@@ -4014,6 +4014,10 @@ export const ServerInfoStatusPayloadSchema = z
         creationLifecycle: z.boolean().optional(),
         // COMPAT(hubAgentRpc): added in v0.8.0; remove gate after 2027-03-05.
         hubAgentRpc: z.boolean().optional(),
+        // The daemon admits sessions as distinct principals through an admission provider.
+        principalAdmission: z.boolean().optional(),
+        // Plugin RPC and subscription handlers receive the authenticated caller.
+        pluginCallerIdentity: z.boolean().optional(),
         // COMPAT(internalAgents): added in v0.9.0; remove gate after 2027-03-17.
         internalAgents: z.boolean().optional(),
         // COMPAT(internalWorkspaces): added in v0.9.0; remove gate after 2027-03-17.
@@ -8557,6 +8561,8 @@ export const WSHelloMessageSchema = z.object({
     .discriminatedUnion("kind", [
       z.object({ kind: z.literal("password"), password: z.string() }),
       z.object({ kind: z.literal("localCredential"), token: z.string() }),
+      // Credential issued by the daemon's admission provider (multi-user mode). Additive and optional.
+      z.object({ kind: z.literal("credential"), token: z.string() }),
     ])
     .optional(),
   appVersion: z.string().optional(),
@@ -8604,6 +8610,9 @@ export const WSHelloRejectedMessageSchema = z.object({
   type: z.literal("hello.rejected"),
   reason: z.enum(["password_required", "incorrect_password", "incompatible_protocol"]),
   accepts: z.array(z.literal("password")),
+  // Present only when the daemon admits principals through a provider (`users`); clients that
+  // know it show a sign-in step instead of a password prompt. Old clients ignore it.
+  authMode: z.enum(["password", "users"]).optional(),
 });
 
 // Complete WebSocket message schemas

@@ -593,6 +593,11 @@ export async function createPaseoDaemon(
   rootLogger: Logger,
   dependencies: PaseoDaemonDependencies = {},
 ): Promise<PaseoDaemon> {
+  if (config.auth?.admissionProvider && !config.auth.password) {
+    // The password is the operator secret for HTTP and MCP surfaces. Without it those surfaces would
+    // be open to every network peer even though WebSocket sessions are authenticated.
+    throw new Error("An admission provider requires daemon.auth.password to be set");
+  }
   // Start hardware detection at the beginning of bootstrap so it overlaps with disk/registry init
   // and does not hold up the listener when probes are slow.
   const hostMachineKindReady = primeHostMachineKind();
@@ -814,6 +819,23 @@ export async function createPaseoDaemon(
     express.json(),
     createTerminalActivityRouteHandler(terminalManager),
   );
+
+  // Multi-user login. Reachable without the operator password by design: the provider owns
+  // validation and throttling. The route exists only when a provider is configured.
+  const admissionProvider = config.auth?.admissionProvider;
+  if (admissionProvider?.login) {
+    app.post("/api/auth/login", express.json({ limit: "16kb" }), (req, res) => {
+      void admissionProvider
+        .login!(req.body, { remoteAddress: req.socket.remoteAddress ?? undefined })
+        .then((result) => {
+          res.status(result.status).json(result.body);
+        })
+        .catch((error) => {
+          logger.error({ err: error }, "Admission provider login failed");
+          res.status(500).json({ error: "Login unavailable" });
+        });
+    });
+  }
 
   // Serve the bundled browser web UI when enabled. Mounted after service-proxy
   // classification and host/CORS handling, but before daemon bearer auth, so

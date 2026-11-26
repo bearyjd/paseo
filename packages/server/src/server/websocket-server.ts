@@ -122,6 +122,11 @@ import {
 } from "./auth.js";
 import { resolveSessionAdmission } from "./session-admission-auth.js";
 import {
+  isAssignablePrincipalId,
+  type AdmissionEvent,
+  type AdmissionProvider,
+} from "./authorization/admission-provider.js";
+import {
   WebSocketRuntimeMetricsWindow,
   type WebSocketRuntimeCounters,
   type WebSocketRuntimeDiagnosticSnapshot,
@@ -169,6 +174,7 @@ export interface SessionAdmission {
 }
 
 interface PendingConnection {
+  remoteAddress?: string;
   connectionLogger: pino.Logger;
   helloTimeout: ReturnType<typeof setTimeout> | null;
   identity: WebSocketConnectionIdentity;
@@ -628,6 +634,8 @@ export class VoiceAssistantWebSocketServer {
   }
   private readonly passwordHash: string | undefined;
   private readonly credentialSource: DaemonAuthConfig | undefined;
+  private readonly admissionProvider: AdmissionProvider | undefined;
+  private unsubscribeAdmission: (() => void) | null = null;
   private readonly worktreesRoot: string | undefined;
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly pushNotifications: PushNotifications;
@@ -758,6 +766,9 @@ export class VoiceAssistantWebSocketServer {
     }
     this.daemonVersion = daemonVersion.trim();
     this.credentialSource = auth;
+    this.admissionProvider = auth?.admissionProvider;
+    this.unsubscribeAdmission =
+      this.admissionProvider?.subscribe((event) => this.handleAdmissionEvent(event)) ?? null;
     this.daemonRuntimeConfig = daemonRuntimeConfig;
     this.browserToolsBroker = browserToolsBroker ?? null;
     this.hubRelationships = hubRelationships ?? null;
@@ -1067,6 +1078,15 @@ export class VoiceAssistantWebSocketServer {
       const token =
         extractHttpBearerToken(request.headers.authorization) ?? extractWsBearerToken(protocol);
       const hasHeaderCredential = token !== null;
+      if (this.admissionProvider) {
+        // A header credential is a provider token. The shared daemon password never admits here.
+        const admission = hasHeaderCredential
+          ? await this.admitHeaderCredential(ws, request, token)
+          : null;
+        if (hasHeaderCredential && !admission) return;
+        await this.attachSocket(ws, request, undefined, false, admission);
+        return;
+      }
       if (password && hasHeaderCredential) {
         const requestMetadata = extractSocketRequestMetadata(request);
         const isAuthorized = await isBearerTokenValidAsync({ password, token });
@@ -1195,6 +1215,77 @@ export class VoiceAssistantWebSocketServer {
     return { closed };
   }
 
+  private async admitHeaderCredential(
+    ws: WebSocket,
+    request: IncomingMessage,
+    token: string,
+  ): Promise<SessionAdmission | null> {
+    const metadata = extractSocketRequestMetadata(request);
+    try {
+      const resolved = await resolveSessionAdmission({
+        credential: { kind: "credential", token },
+        passwordHash: this.passwordHash,
+        localCredential: this.credentialSource?.localCredential?.() ?? null,
+        provider: this.admissionProvider!,
+        clientId: "",
+        ...(metadata.remoteAddress ? { remoteAddress: metadata.remoteAddress } : {}),
+      });
+      if ("admission" in resolved) return resolved.admission;
+    } catch (error) {
+      this.logger.error({ err: error }, "Failed to resolve header credential");
+    }
+    this.logger.warn({ ...metadata, hasToken: true }, "Rejected WebSocket connection with invalid credential");
+    ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Incorrect password");
+    return null;
+  }
+
+  private handleAdmissionEvent(event: AdmissionEvent): void {
+    // A provider can only act on principals it may mint; never the operator, Hub or plugins.
+    if (!isAssignablePrincipalId(event.principalId)) return;
+    if (event.permissions === null) {
+      this.closePrincipal(event.principalId);
+      return;
+    }
+    this.updatePrincipalPermissions(event.principalId, event.permissions);
+  }
+
+  /** Ends every live and resumable session of a principal. It must re-authenticate to return. */
+  private closePrincipal(principalId: string): void {
+    for (const [socket, link] of this.hostLinks) {
+      if (this.sessions.get(socket)?.principalId === principalId) {
+        link.close("permission_denied");
+        this.hostLinks.delete(socket);
+      }
+    }
+    for (const [socket, pending] of this.pendingConnections) {
+      if (pending.admission?.principalId !== principalId) continue;
+      this.clearPendingConnection(socket);
+      try {
+        socket.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Credential revoked");
+      } catch {
+        // already closed
+      }
+    }
+    const connections = new Set<SessionConnection>(
+      [...this.sessions.values(), ...this.externalSessionsByKey.values()].filter(
+        (connection) => connection.principalId === principalId,
+      ),
+    );
+    for (const connection of connections) {
+      const sockets = [...connection.sockets];
+      void this.cleanupConnection(connection, "Principal revoked").catch((err) =>
+        this.logger.error({ err }, "Failed to clean up revoked principal session"),
+      );
+      for (const socket of sockets) {
+        try {
+          socket.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Credential revoked");
+        } catch {
+          // already closed
+        }
+      }
+    }
+  }
+
   public updatePrincipalPermissions(
     principalId: string,
     permissions: readonly DaemonPermission[],
@@ -1235,6 +1326,8 @@ export class VoiceAssistantWebSocketServer {
     this.prepareForShutdown();
     await this.agentMessages.close();
     await this.connectedHosts.close();
+    this.unsubscribeAdmission?.();
+    this.unsubscribeAdmission = null;
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -1584,6 +1677,7 @@ export class VoiceAssistantWebSocketServer {
     const connectionLogger = this.logger.child(toConnectionLogFields(identity));
 
     const pending: PendingConnection = {
+      ...(requestMetadata.remoteAddress ? { remoteAddress: requestMetadata.remoteAddress } : {}),
       connectionLogger,
       helloTimeout: null,
       identity,
@@ -1973,6 +2067,9 @@ export class VoiceAssistantWebSocketServer {
         credential: message.auth,
         passwordHash: this.passwordHash,
         localCredential: this.credentialSource?.localCredential?.() ?? null,
+        ...(this.admissionProvider ? { provider: this.admissionProvider } : {}),
+        clientId: message.clientId,
+        ...(pending.remoteAddress ? { remoteAddress: pending.remoteAddress } : {}),
       });
       if (this.pendingConnections.get(ws) !== pending) return false;
       if ("rejection" in resolved) {
@@ -2001,7 +2098,14 @@ export class VoiceAssistantWebSocketServer {
     // They never send hello.auth, so avoid sending an unknown envelope to them.
     if (hello.auth || hello.capabilities?.[CLIENT_CAPS.helloRejection] === true) {
       try {
-        await ws.send(JSON.stringify({ type: "hello.rejected", reason, accepts: ["password"] }));
+        await ws.send(
+          JSON.stringify({
+            type: "hello.rejected",
+            reason,
+            accepts: ["password"],
+            ...(this.admissionProvider ? { authMode: "users" } : {}),
+          }),
+        );
       } catch {
         // The close reason remains the compatibility signal.
       }
@@ -2119,6 +2223,8 @@ export class VoiceAssistantWebSocketServer {
         workspaceRequestReceipts: true,
         creationLifecycle: true,
         hubAgentRpc: true,
+        ...(this.admissionProvider ? { principalAdmission: true } : {}),
+        pluginCallerIdentity: true,
         backgroundWorkspaces: true,
         // COMPAT(backgroundAgents): added in v0.15.0; remove gate after 2027-05-03.
         backgroundAgents: true,
