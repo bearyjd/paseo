@@ -13,6 +13,7 @@ import type { PluginRegistries } from "@getpaseo/protocol/plugin-registry";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import express from "express";
 import type { AdmissionProvider } from "./authorization/admission-provider.js";
+import { loadAdmissionProvider } from "./authorization/admission-module.js";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open, rm, stat } from "fs/promises";
@@ -589,6 +590,21 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
   return initialConfig;
 }
 
+/** Resolves `auth.admissionModule` into `auth.admissionProvider`; a load failure aborts start-up. */
+async function withAdmissionProvider(
+  config: PaseoDaemonConfig,
+  logger: Logger,
+): Promise<PaseoDaemonConfig> {
+  const modulePath = config.auth?.admissionModule;
+  if (!modulePath || config.auth?.admissionProvider) return config;
+  const provider = await loadAdmissionProvider(modulePath, {
+    paseoHome: config.paseoHome,
+    logger,
+  });
+  logger.info({ admissionModule: modulePath }, "Admission provider loaded");
+  return { ...config, auth: { ...config.auth, admissionProvider: provider } };
+}
+
 function assertAdmissionConfig(auth: DaemonAuthConfig | undefined): void {
   if (auth?.admissionProvider && !auth.password) {
     // The password is the operator secret for HTTP and MCP surfaces. Without it those surfaces would
@@ -629,10 +645,11 @@ function mountAdmissionLogin(
 }
 
 export async function createPaseoDaemon(
-  config: PaseoDaemonConfig,
+  inputConfig: PaseoDaemonConfig,
   rootLogger: Logger,
   dependencies: PaseoDaemonDependencies = {},
 ): Promise<PaseoDaemon> {
+  const config = await withAdmissionProvider(inputConfig, rootLogger);
   assertAdmissionConfig(config.auth);
   // Start hardware detection at the beginning of bootstrap so it overlaps with disk/registry init
   // and does not hold up the listener when probes are slow.

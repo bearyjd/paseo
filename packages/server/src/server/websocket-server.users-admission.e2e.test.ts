@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { WebSocket } from "ws";
 import { hash } from "bcryptjs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -284,5 +287,51 @@ describe("daemon with an admission provider", () => {
     await expect(
       createTestPaseoDaemon({ auth: { admissionProvider: new FakeProvider() } }),
     ).rejects.toThrow(/admission provider requires/i);
+  });
+});
+
+describe("daemon configured with an admission module path", () => {
+  test("loads the provider from the module and admits its credentials", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "admission-module-e2e-"));
+    try {
+      const file = path.join(root, "provider.mjs");
+      await writeFile(
+        file,
+        `export function createAdmissionProvider() {
+          return {
+            authenticate: async (token) =>
+              token === "tok-mod" ? { principalId: "user:mod", permissions: ["workspace.read"] } : null,
+            subscribe: () => () => undefined,
+          };
+        }`,
+      );
+      const daemon = await createTestPaseoDaemon({
+        auth: { password: await hash(DAEMON_PASSWORD, 4), admissionModule: file },
+      });
+      try {
+        const session = await admit(daemon.port, "m", { kind: "credential", token: "tok-mod" });
+        expect(serverInfo(session.frames).permissions).toEqual(["workspace.read"]);
+        const shared = await admit(daemon.port, "m2", {
+          kind: "password",
+          password: DAEMON_PASSWORD,
+        });
+        expect(serverInfo(shared.frames)).toBeUndefined();
+      } finally {
+        await daemon.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a module that cannot be loaded stops the daemon from starting rather than falling back to open admission", async () => {
+    await expect(
+      createTestPaseoDaemon({
+        auth: {
+          password: await hash(DAEMON_PASSWORD, 4),
+          admissionModule: "/nonexistent/provider.mjs",
+        },
+      }),
+    ).rejects.toThrow();
   });
 });

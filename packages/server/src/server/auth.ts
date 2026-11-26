@@ -14,6 +14,8 @@ export interface DaemonAuthConfig {
    * surfaces and no longer admits WebSocket sessions. See authorization/admission-provider.ts.
    */
   admissionProvider?: AdmissionProvider;
+  /** Absolute path of a module exporting `createAdmissionProvider`; loaded at start-up. */
+  admissionModule?: string;
 }
 
 export interface BearerAuthRejectContext {

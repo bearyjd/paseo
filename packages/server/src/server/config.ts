@@ -497,12 +497,15 @@ function resolveAuthConfig(
   persisted: ReturnType<typeof loadPersistedConfig>,
 ): PaseoDaemonConfig["auth"] {
   const envPassword = env.PASEO_PASSWORD?.trim();
+  const admissionModule = env.PASEO_ADMISSION_MODULE?.trim();
+  const moduleField = admissionModule ? { admissionModule } : {};
   if (envPassword) {
-    return { password: hashDaemonPassword(envPassword) };
+    return { password: hashDaemonPassword(envPassword), ...moduleField };
   }
-  return persisted.daemon?.auth?.password
-    ? { password: persisted.daemon.auth.password }
-    : undefined;
+  if (persisted.daemon?.auth?.password) {
+    return { password: persisted.daemon.auth.password, ...moduleField };
+  }
+  return admissionModule ? moduleField : undefined;
 }
 
 function resolveWorktreesRoot(
