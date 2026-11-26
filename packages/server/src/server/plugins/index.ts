@@ -1,3 +1,4 @@
+import type { PluginCaller } from "@getpaseo/plugin/server";
 import type { PluginSessionsRuntime } from "./agent-tools.js";
 import type { PluginLifecycle } from "./lifecycle/index.js";
 import path from "node:path";
@@ -54,7 +55,7 @@ interface PluginRuntimePort {
   removeWorktree?: PluginWorktreeManagerRuntime["removeWorktree"];
   restoreWorktree?: PluginWorktreeManagerRuntime["restoreWorktree"];
   catalog: PluginRuntime["catalog"];
-  invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
+  invoke: PluginRuntime["invoke"];
   startSubscription: PluginRuntime["startSubscription"];
   getLogs(pluginId: string): PluginLogEntry[];
   clearLogs(pluginId: string): void;
@@ -598,12 +599,22 @@ export class PluginService {
     });
   }
 
-  invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
-    return this.runtime.invoke(pluginId, method, input);
+  invokePluginRpc(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    caller?: PluginCaller,
+  ): Promise<unknown> {
+    return this.runtime.invoke(pluginId, method, input, caller);
   }
 
-  subscribePluginRpc(pluginId: string, method: string, input: unknown): PluginRuntimeSubscription {
-    return this.runtime.startSubscription(pluginId, method, input);
+  subscribePluginRpc(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    caller?: PluginCaller,
+  ): PluginRuntimeSubscription {
+    return this.runtime.startSubscription(pluginId, method, input, caller);
   }
 
   async stopAllPlugins(): Promise<void> {

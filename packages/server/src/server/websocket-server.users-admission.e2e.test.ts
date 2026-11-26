@@ -72,15 +72,24 @@ async function waitFor<T>(read: () => T | undefined, label: string): Promise<T> 
   }
 }
 
+const errorFor = (frames: Frame[], requestId: string) =>
+  frames.find((f) => f.message?.type === "rpc_error" && f.message.payload.requestId === requestId);
+const responseFor = (frames: Frame[], requestId: string) =>
+  frames.find((f) => f.message?.payload?.requestId === requestId)?.message;
+
 const serverInfo = (frames: Frame[]) =>
-  frames.find((f) => f.type === "session" && f.message?.payload?.status === "server_info")?.message.payload;
+  frames.find((f) => f.type === "session" && f.message?.payload?.status === "server_info")?.message
+    .payload;
 const rejection = (frames: Frame[]) => frames.find((f) => f.type === "hello.rejected");
 
 async function admit(port: number, clientId: string, auth?: Frame) {
   const c = open(port);
   await c.opened;
   c.ws.send(JSON.stringify(hello(clientId, auth)));
-  await waitFor(() => (serverInfo(c.frames) || rejection(c.frames) ? true : undefined), "hello result");
+  await waitFor(
+    () => (serverInfo(c.frames) || rejection(c.frames) ? true : undefined),
+    "hello result",
+  );
   return c;
 }
 
@@ -92,21 +101,45 @@ describe("daemon with an admission provider", () => {
 
   test("admits each credential as its own principal with exactly its permissions", async () => {
     const provider = new FakeProvider();
-    provider.tokens.set("tok-alice", { principalId: "user:alice", permissions: ["daemon.read", "workspace.read"] });
-    provider.tokens.set("tok-admin", { principalId: "user:admin", permissions: ["daemon.read", "daemon.manage", "workspace.read"] });
+    provider.tokens.set("tok-alice", {
+      principalId: "user:alice",
+      permissions: ["daemon.read", "workspace.read"],
+    });
+    provider.tokens.set("tok-admin", {
+      principalId: "user:admin",
+      permissions: ["daemon.read", "daemon.manage", "workspace.read"],
+    });
     const daemon = await start(provider);
     try {
-      const alice = await admit(daemon.port, "same-client-id", { kind: "credential", token: "tok-alice" });
-      const admin = await admit(daemon.port, "same-client-id", { kind: "credential", token: "tok-admin" });
-      expect([...serverInfo(alice.frames).permissions].sort()).toEqual(["daemon.read", "workspace.read"]);
-      expect([...serverInfo(admin.frames).permissions].sort()).toEqual(["daemon.manage", "daemon.read", "workspace.read"]);
-      expect(serverInfo(alice.frames).features).toMatchObject({ principalAdmission: true, pluginCallerIdentity: true });
+      const alice = await admit(daemon.port, "same-client-id", {
+        kind: "credential",
+        token: "tok-alice",
+      });
+      const admin = await admit(daemon.port, "same-client-id", {
+        kind: "credential",
+        token: "tok-admin",
+      });
+      expect([...serverInfo(alice.frames).permissions].sort()).toEqual([
+        "daemon.read",
+        "workspace.read",
+      ]);
+      expect([...serverInfo(admin.frames).permissions].sort()).toEqual([
+        "daemon.manage",
+        "daemon.read",
+        "workspace.read",
+      ]);
+      expect(serverInfo(alice.frames).features).toMatchObject({
+        principalAdmission: true,
+        pluginCallerIdentity: true,
+      });
       // Alice cannot reach an operator-only operation even though she shares a clientId with the admin.
-      alice.ws.send(JSON.stringify({ type: "session", message: { type: "plugin.list.request", requestId: "r1" } }));
-      const denied = await waitFor(
-        () => alice.frames.find((f) => f.message?.type === "rpc_error" && f.message.payload.requestId === "r1"),
-        "alice denied",
+      alice.ws.send(
+        JSON.stringify({
+          type: "session",
+          message: { type: "plugin.list.request", requestId: "r1" },
+        }),
       );
+      const denied = await waitFor(() => errorFor(alice.frames, "r1"), "alice denied");
       expect(denied.message.payload.code).toBe("access_denied");
       alice.ws.close();
       admin.ws.close();
@@ -119,13 +152,22 @@ describe("daemon with an admission provider", () => {
     const provider = new FakeProvider();
     const daemon = await start(provider);
     try {
-      const shared = await admit(daemon.port, "c1", { kind: "password", password: DAEMON_PASSWORD });
+      const shared = await admit(daemon.port, "c1", {
+        kind: "password",
+        password: DAEMON_PASSWORD,
+      });
       expect(serverInfo(shared.frames)).toBeUndefined();
-      expect(rejection(shared.frames)).toMatchObject({ reason: "incorrect_password", authMode: "users" });
+      expect(rejection(shared.frames)).toMatchObject({
+        reason: "incorrect_password",
+        authMode: "users",
+      });
       const bad = await admit(daemon.port, "c2", { kind: "credential", token: "nope" });
       expect(rejection(bad.frames)).toMatchObject({ reason: "incorrect_password" });
       const none = await admit(daemon.port, "c3");
-      expect(rejection(none.frames)).toMatchObject({ reason: "password_required", authMode: "users" });
+      expect(rejection(none.frames)).toMatchObject({
+        reason: "password_required",
+        authMode: "users",
+      });
       expect(serverInfo(none.frames)).toBeUndefined();
     } finally {
       await daemon.close();
@@ -134,7 +176,10 @@ describe("daemon with an admission provider", () => {
 
   test("the header bearer path goes through the provider, not the shared password", async () => {
     const provider = new FakeProvider();
-    provider.tokens.set("tok-alice", { principalId: "user:alice", permissions: ["workspace.read"] });
+    provider.tokens.set("tok-alice", {
+      principalId: "user:alice",
+      permissions: ["workspace.read"],
+    });
     const daemon = await start(provider);
     try {
       const withPassword = open(daemon.port, { Authorization: `Bearer ${DAEMON_PASSWORD}` });
@@ -154,7 +199,10 @@ describe("daemon with an admission provider", () => {
 
   test("revoking a principal closes its live sockets, and it cannot reconnect", async () => {
     const provider = new FakeProvider();
-    provider.tokens.set("tok-alice", { principalId: "user:alice", permissions: ["workspace.read"] });
+    provider.tokens.set("tok-alice", {
+      principalId: "user:alice",
+      permissions: ["workspace.read"],
+    });
     const daemon = await start(provider);
     try {
       const alice = await admit(daemon.port, "a1", { kind: "credential", token: "tok-alice" });
@@ -171,18 +219,29 @@ describe("daemon with an admission provider", () => {
 
   test("narrowing a principal's permissions applies to its live session immediately", async () => {
     const provider = new FakeProvider();
-    provider.tokens.set("tok-admin", { principalId: "user:admin", permissions: ["daemon.read", "daemon.manage"] });
+    provider.tokens.set("tok-admin", {
+      principalId: "user:admin",
+      permissions: ["daemon.read", "daemon.manage"],
+    });
     const daemon = await start(provider);
     try {
       const admin = await admit(daemon.port, "m1", { kind: "credential", token: "tok-admin" });
       const ask = async (id: string) => {
-        admin.ws.send(JSON.stringify({ type: "session", message: { type: "plugin.list.request", requestId: id } }));
-        return waitFor(() => admin.frames.find((f) => f.message?.payload?.requestId === id)?.message, id);
+        admin.ws.send(
+          JSON.stringify({
+            type: "session",
+            message: { type: "plugin.list.request", requestId: id },
+          }),
+        );
+        return waitFor(() => responseFor(admin.frames, id), id);
       };
       expect((await ask("before")).type).toBe("plugin.list.response");
       provider.emit({ principalId: "user:admin", permissions: ["daemon.read"] });
       await new Promise((r) => setTimeout(r, 50));
-      expect(await ask("after")).toMatchObject({ type: "rpc_error", payload: { code: "access_denied" } });
+      expect(await ask("after")).toMatchObject({
+        type: "rpc_error",
+        payload: { code: "access_denied" },
+      });
       admin.ws.close();
     } finally {
       await daemon.close();
@@ -208,9 +267,13 @@ describe("daemon with an admission provider", () => {
   });
 
   test("without a provider the login route does not exist", async () => {
-    const daemon = await createTestPaseoDaemon({ auth: { password: await hash(DAEMON_PASSWORD, 4) } });
+    const daemon = await createTestPaseoDaemon({
+      auth: { password: await hash(DAEMON_PASSWORD, 4) },
+    });
     try {
-      const response = await fetch(`http://127.0.0.1:${daemon.port}/api/auth/login`, { method: "POST" });
+      const response = await fetch(`http://127.0.0.1:${daemon.port}/api/auth/login`, {
+        method: "POST",
+      });
       expect(response.status).toBe(401);
     } finally {
       await daemon.close();
@@ -218,8 +281,8 @@ describe("daemon with an admission provider", () => {
   });
 
   test("refuses to start in provider mode without an operator password (HTTP and MCP would be open)", async () => {
-    await expect(createTestPaseoDaemon({ auth: { admissionProvider: new FakeProvider() } })).rejects.toThrow(
-      /admission provider requires/i,
-    );
+    await expect(
+      createTestPaseoDaemon({ auth: { admissionProvider: new FakeProvider() } }),
+    ).rejects.toThrow(/admission provider requires/i);
   });
 });

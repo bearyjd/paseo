@@ -515,6 +515,7 @@ type SessionConnection = ReconnectableSessionConnection | PluginSessionConnectio
 
 interface SocketSessionOptions {
   sourceId?: string;
+  principalId: string;
   clientId: string;
   appVersion: string | null;
   clientCapabilities: Record<string, unknown> | null;
@@ -766,9 +767,8 @@ export class VoiceAssistantWebSocketServer {
     }
     this.daemonVersion = daemonVersion.trim();
     this.credentialSource = auth;
-    this.admissionProvider = auth?.admissionProvider;
-    this.unsubscribeAdmission =
-      this.admissionProvider?.subscribe((event) => this.handleAdmissionEvent(event)) ?? null;
+    this.admissionProvider = readAdmissionProvider(auth);
+    this.unsubscribeAdmission = this.subscribeToAdmissionProvider();
     this.daemonRuntimeConfig = daemonRuntimeConfig;
     this.browserToolsBroker = browserToolsBroker ?? null;
     this.hubRelationships = hubRelationships ?? null;
@@ -1215,6 +1215,11 @@ export class VoiceAssistantWebSocketServer {
     return { closed };
   }
 
+  private subscribeToAdmissionProvider(): (() => void) | null {
+    if (!this.admissionProvider) return null;
+    return this.admissionProvider.subscribe((event) => this.handleAdmissionEvent(event));
+  }
+
   private async admitHeaderCredential(
     ws: WebSocket,
     request: IncomingMessage,
@@ -1234,7 +1239,10 @@ export class VoiceAssistantWebSocketServer {
     } catch (error) {
       this.logger.error({ err: error }, "Failed to resolve header credential");
     }
-    this.logger.warn({ ...metadata, hasToken: true }, "Rejected WebSocket connection with invalid credential");
+    this.logger.warn(
+      { ...metadata, hasToken: true },
+      "Rejected WebSocket connection with invalid credential",
+    );
     ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Incorrect password");
     return null;
   }
@@ -1735,6 +1743,7 @@ export class VoiceAssistantWebSocketServer {
       appVersion,
       clientCapabilities,
       permissions: admission.permissions,
+      principalId: admission.principalId,
       sourceId:
         lifecycle.kind === "ephemeral-plugin"
           ? `plugin:${lifecycle.pluginId}`
@@ -1821,6 +1830,7 @@ export class VoiceAssistantWebSocketServer {
         return total;
       },
       sourceId: options.sourceId,
+      principalId: options.principalId,
       browserToolsBroker: this.browserToolsBroker,
       clientId: options.clientId,
       appVersion: options.appVersion,
@@ -3629,6 +3639,10 @@ export function isWebSocketSameOrigin(
   }
 
   return isLoopbackAlias(originUrl.hostname) && isLoopbackAlias(requestAuthority.hostname);
+}
+
+function readAdmissionProvider(auth: DaemonAuthConfig | undefined): AdmissionProvider | undefined {
+  return auth?.admissionProvider;
 }
 
 function selectWebSocketProtocol(

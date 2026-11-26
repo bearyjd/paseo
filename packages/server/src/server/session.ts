@@ -1,3 +1,4 @@
+import type { PluginCaller } from "@getpaseo/plugin/server";
 import { DiffSession } from "./diff/index.js";
 import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import type { AgentMessageBehavior, AgentMessageDelivery } from "./agent/agent-messages/index.js";
@@ -497,6 +498,8 @@ type AgentMcpTransportFactory = () => Promise<unknown>;
 export interface SessionOptions {
   connectedHosts?: ConnectedHosts;
   sourceId?: string;
+  /** Authenticated principal of this session; handed to plugin handlers as the caller. */
+  principalId?: string;
   routed?: boolean;
   browserToolsBroker?: BrowserToolsBroker | null;
   clientId: string;
@@ -584,11 +587,17 @@ export interface SessionOptions {
     subscribe(listener: (pluginId: string) => void): () => void;
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
     catalog(): Array<{ id: string; clientBundle: string; clientBundleHash?: string }>;
-    invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
+    invokePluginRpc(
+      pluginId: string,
+      method: string,
+      input: unknown,
+      caller?: PluginCaller,
+    ): Promise<unknown>;
     subscribePluginRpc(
       pluginId: string,
       method: string,
       input: unknown,
+      caller?: PluginCaller,
     ): import("./plugins/runtime-subscription.js").PluginRuntimeSubscription;
     listUsageReports(options?: {
       forceRefresh?: boolean;
@@ -806,6 +815,7 @@ export class Session {
   private readonly browserToolsBroker: SessionOptions["browserToolsBroker"];
   private readonly clientId: string;
   private readonly authorization: SessionAuthorization;
+  private readonly principalId: string | undefined;
   private appVersion: string | null;
   private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
@@ -983,6 +993,7 @@ export class Session {
       getWebSocketRuntimeMetrics,
     } = options;
     this.browserToolsBroker = options.browserToolsBroker;
+    this.principalId = options.principalId;
     this.clientId = clientId;
     this.authorization = new SessionAuthorization(permissions);
 
@@ -2595,6 +2606,12 @@ export class Session {
     }
   }
 
+  /** The caller identity handed to plugin handlers: server-derived from this session, never from input. */
+  private pluginCaller(): PluginCaller | undefined {
+    if (!this.principalId) return undefined;
+    return { principalId: this.principalId, permissions: this.getPermissions() };
+  }
+
   public getPermissions(): DaemonPermission[] {
     return this.authorization.listPermissions();
   }
@@ -2971,7 +2988,7 @@ export class Session {
     if (msg.type === "plugin.rpc.invoke.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
       return this.pluginRuntime
-        .invokePluginRpc(msg.pluginId, msg.method, msg.input)
+        .invokePluginRpc(msg.pluginId, msg.method, msg.input, this.pluginCaller())
         .then((output) => this.replyPluginRpc(msg, output));
     }
     if (msg.type === "plugin.rpc.subscribe.request") return this.subscribePluginRpc(msg);
@@ -3011,6 +3028,7 @@ export class Session {
       request.pluginId,
       request.method,
       request.input,
+      this.pluginCaller(),
     );
     const owner = this.delivery.begin("plugin-rpc", undefined, () => subscription.release());
     try {

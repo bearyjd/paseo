@@ -8,8 +8,21 @@ import type { PluginLifecycleRegistration } from "./lifecycle.js";
 import type { PluginNotifications } from "./notifications.js";
 import type { WorktreeManagerRegistration } from "./worktree.js";
 
+/**
+ * The authenticated principal whose session invoked the handler. Set by the daemon from the
+ * session, never from request input. Absent on daemons that predate caller identity: check
+ * `server_info.features.pluginCallerIdentity` before relying on it for authorization.
+ */
+export interface PluginCaller {
+  /** `owner` for the operator, or the id an admission provider assigned. */
+  principalId: string;
+  /** Daemon permissions of the caller's session at the time of the call. */
+  permissions: readonly string[];
+}
+
 export interface PluginHandlerContext {
   paseo: PaseoApi;
+  caller?: PluginCaller;
 }
 
 /** What a subscription handler receives beside its input. */

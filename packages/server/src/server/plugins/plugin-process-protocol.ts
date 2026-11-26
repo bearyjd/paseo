@@ -1,5 +1,9 @@
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
-import type { PluginHookAgent, PluginNotificationSendResult } from "@getpaseo/plugin/server";
+import type {
+  PluginCaller,
+  PluginHookAgent,
+  PluginNotificationSendResult,
+} from "@getpaseo/plugin/server";
 import { UsageScopeSchema, type UsageScope } from "@getpaseo/plugin/server/usage";
 import type {
   ProviderConnectRequest,
@@ -17,6 +21,10 @@ import {
   ProviderLaunchSchema,
 } from "@getpaseo/plugin/server/provider";
 import { z } from "zod";
+
+export const PluginCallerSchema = z
+  .object({ principalId: z.string().min(1), permissions: z.array(z.string()) })
+  .strict();
 
 export interface PluginProviderMetadata {
   requiresConfiguration?: boolean;
@@ -98,13 +106,14 @@ export type PluginProcessRequest =
   | { type: "worktree.cancel"; requestId: string }
   | { type: "usage.fetch"; requestId: string; sourceId: string; input: unknown }
   | { type: "usage.discover"; requestId: string; sourceId: string; scope: UsageScope }
-  | { type: "invoke"; requestId: string; method: string; input: unknown }
+  | { type: "invoke"; requestId: string; method: string; input: unknown; caller?: PluginCaller }
   | {
       type: "subscribe";
       requestId: string;
       subscriptionId: string;
       method: string;
       input: unknown;
+      caller?: PluginCaller;
     }
   | { type: "unsubscribe"; subscriptionId: string }
   | {
@@ -353,6 +362,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
         requestId: z.string().min(1),
         method: z.string().min(1),
         input: z.unknown(),
+        caller: PluginCallerSchema.optional(),
       })
       .strict(),
     z
@@ -362,6 +372,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
         subscriptionId: z.string().min(1),
         method: z.string().min(1),
         input: z.unknown(),
+        caller: PluginCallerSchema.optional(),
       })
       .strict(),
     z.object({ type: z.literal("unsubscribe"), subscriptionId: z.string().min(1) }).strict(),

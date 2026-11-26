@@ -88,7 +88,12 @@ export class PluginSubscriptionHandlers {
     this.active.set(subscriptionId, { controller });
     let result: unknown;
     try {
-      result = registered.handler(parsed.data, { paseo, push, signal });
+      result = registered.handler(parsed.data, {
+        paseo,
+        push,
+        signal,
+        ...(message.caller ? { caller: message.caller } : {}),
+      });
     } catch (error) {
       this.active.delete(subscriptionId);
       controller.abort();

@@ -1,6 +1,9 @@
 import { compare } from "bcryptjs";
 import type { WSHelloMessage } from "@getpaseo/protocol/messages";
-import { isAssignablePrincipalId, type AdmissionProvider } from "./authorization/admission-provider.js";
+import {
+  isAssignablePrincipalId,
+  type AdmissionProvider,
+} from "./authorization/admission-provider.js";
 import { OWNER_PERMISSIONS, isDaemonPermission } from "./authorization/index.js";
 import { matchesLocalCredential } from "./local-credential.js";
 import type { SessionAdmission } from "./websocket-server.js";
@@ -72,6 +75,9 @@ async function resolveProviderAdmission(input: {
     return { rejection: "incorrect_password" };
   }
   return {
-    admission: { principalId: admitted.principalId, permissions: [...new Set(admitted.permissions)] },
+    admission: {
+      principalId: admitted.principalId,
+      permissions: [...new Set(admitted.permissions)],
+    },
   };
 }

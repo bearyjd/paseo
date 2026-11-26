@@ -1,5 +1,5 @@
 import { validateWorktreePath } from "../../utils/worktree-path.js";
-import type { PluginHookPayload } from "@getpaseo/plugin/server";
+import type { PluginCaller, PluginHookPayload } from "@getpaseo/plugin/server";
 import type { PluginLifecycleBeforeName, PluginWireBeforeRequests } from "./lifecycle/index.js";
 import { SessionAttachments, type SessionOpenPlugin } from "./session-attachments.js";
 import type { UsageScope } from "@getpaseo/plugin/server/usage";
@@ -665,16 +665,32 @@ export class PluginRuntime {
     this.logTails.delete(pluginId);
   }
 
-  async invoke(pluginId: string, method: string, input: unknown): Promise<unknown> {
+  async invoke(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    caller?: PluginCaller,
+  ): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
     if (!loaded.methods.has(method))
       throw new Error(`Plugin ${pluginId} does not contribute RPC ${method}`);
-    return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
+    return this.request(loaded, {
+      type: "invoke",
+      requestId: randomUUID(),
+      method,
+      input,
+      ...(caller ? { caller } : {}),
+    });
   }
 
   /** Starts one subscriber's handler in the plugin process. */
-  startSubscription(pluginId: string, method: string, input: unknown): PluginRuntimeSubscription {
+  startSubscription(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    caller?: PluginCaller,
+  ): PluginRuntimeSubscription {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
     if (!loaded.subscriptionMethods.has(method))
@@ -688,6 +704,7 @@ export class PluginRuntime {
       subscriptionId,
       method,
       input,
+      ...(caller ? { caller } : {}),
     }).then(
       () => undefined,
       (error: unknown) => {

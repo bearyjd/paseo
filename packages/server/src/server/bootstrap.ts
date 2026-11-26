@@ -12,6 +12,7 @@ import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js"
 import type { PluginRegistries } from "@getpaseo/protocol/plugin-registry";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import express from "express";
+import type { AdmissionProvider } from "./authorization/admission-provider.js";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open, rm, stat } from "fs/promises";
@@ -588,16 +589,51 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
   return initialConfig;
 }
 
+function assertAdmissionConfig(auth: DaemonAuthConfig | undefined): void {
+  if (auth?.admissionProvider && !auth.password) {
+    // The password is the operator secret for HTTP and MCP surfaces. Without it those surfaces would
+    // be open to every network peer even though WebSocket sessions are authenticated.
+    throw new Error("An admission provider requires daemon.auth.password to be set");
+  }
+}
+
+async function respondToLogin(
+  login: NonNullable<AdmissionProvider["login"]>,
+  req: express.Request,
+  res: express.Response,
+  logger: Logger,
+): Promise<void> {
+  try {
+    const result = await login(req.body, { remoteAddress: req.socket.remoteAddress ?? undefined });
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error({ err: error }, "Admission provider login failed");
+    res.status(500).json({ error: "Login unavailable" });
+  }
+}
+
+/**
+ * Multi-user login. Reachable without the operator password by design: the provider owns
+ * validation and throttling. The route exists only when a provider with `login` is configured.
+ */
+function mountAdmissionLogin(
+  app: express.Express,
+  provider: AdmissionProvider | undefined,
+  logger: Logger,
+): void {
+  const login = provider?.login?.bind(provider);
+  if (!login) return;
+  app.post("/api/auth/login", express.json({ limit: "16kb" }), (req, res) => {
+    void respondToLogin(login, req, res, logger);
+  });
+}
+
 export async function createPaseoDaemon(
   config: PaseoDaemonConfig,
   rootLogger: Logger,
   dependencies: PaseoDaemonDependencies = {},
 ): Promise<PaseoDaemon> {
-  if (config.auth?.admissionProvider && !config.auth.password) {
-    // The password is the operator secret for HTTP and MCP surfaces. Without it those surfaces would
-    // be open to every network peer even though WebSocket sessions are authenticated.
-    throw new Error("An admission provider requires daemon.auth.password to be set");
-  }
+  assertAdmissionConfig(config.auth);
   // Start hardware detection at the beginning of bootstrap so it overlaps with disk/registry init
   // and does not hold up the listener when probes are slow.
   const hostMachineKindReady = primeHostMachineKind();
@@ -820,22 +856,7 @@ export async function createPaseoDaemon(
     createTerminalActivityRouteHandler(terminalManager),
   );
 
-  // Multi-user login. Reachable without the operator password by design: the provider owns
-  // validation and throttling. The route exists only when a provider is configured.
-  const admissionProvider = config.auth?.admissionProvider;
-  if (admissionProvider?.login) {
-    app.post("/api/auth/login", express.json({ limit: "16kb" }), (req, res) => {
-      void admissionProvider
-        .login!(req.body, { remoteAddress: req.socket.remoteAddress ?? undefined })
-        .then((result) => {
-          res.status(result.status).json(result.body);
-        })
-        .catch((error) => {
-          logger.error({ err: error }, "Admission provider login failed");
-          res.status(500).json({ error: "Login unavailable" });
-        });
-    });
-  }
+  mountAdmissionLogin(app, config.auth?.admissionProvider, logger);
 
   // Serve the bundled browser web UI when enabled. Mounted after service-proxy
   // classification and host/CORS handling, but before daemon bearer auth, so

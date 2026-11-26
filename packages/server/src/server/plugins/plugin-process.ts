@@ -849,7 +849,10 @@ export function createPluginWorker(options: {
       .parseAsync(message.input)
       .then((input) => {
         if (!paseo) throw new Error("Plugin Paseo API is unavailable");
-        return registered.handler(input, { paseo });
+        return registered.handler(input, {
+          paseo,
+          ...(message.caller ? { caller: message.caller } : {}),
+        });
       })
       .then((output: unknown) => {
         assertPluginWireValue(output, "output");
