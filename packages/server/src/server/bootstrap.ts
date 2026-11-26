@@ -613,34 +613,44 @@ function assertAdmissionConfig(auth: DaemonAuthConfig | undefined): void {
   }
 }
 
-async function respondToLogin(
-  login: NonNullable<AdmissionProvider["login"]>,
+async function respondToAuthRequest(
+  handle: NonNullable<AdmissionProvider["http"]>,
   req: express.Request,
   res: express.Response,
   logger: Logger,
 ): Promise<void> {
   try {
-    const result = await login(req.body, { remoteAddress: req.socket.remoteAddress ?? undefined });
+    const headers: Record<string, string | undefined> = {};
+    for (const [name, value] of Object.entries(req.headers)) {
+      headers[name] = Array.isArray(value) ? value.join(", ") : value;
+    }
+    const result = await handle({
+      method: req.method,
+      path: req.path,
+      headers,
+      body: req.body,
+      remoteAddress: req.socket.remoteAddress ?? undefined,
+    });
     res.status(result.status).json(result.body);
   } catch (error) {
-    logger.error({ err: error }, "Admission provider login failed");
-    res.status(500).json({ error: "Login unavailable" });
+    logger.error({ err: error }, "Admission provider request failed");
+    res.status(500).json({ error: "Request failed" });
   }
 }
 
 /**
- * Multi-user login. Reachable without the operator password by design: the provider owns
- * validation and throttling. The route exists only when a provider with `login` is configured.
+ * Provider-hosted API under /api/auth. Reachable without the operator password by design: the
+ * provider authenticates each request. The route exists only when a provider serves `http`.
  */
-function mountAdmissionLogin(
+function mountAdmissionRoutes(
   app: express.Express,
   provider: AdmissionProvider | undefined,
   logger: Logger,
 ): void {
-  const login = provider?.login?.bind(provider);
-  if (!login) return;
-  app.post("/api/auth/login", express.json({ limit: "16kb" }), (req, res) => {
-    void respondToLogin(login, req, res, logger);
+  const handle = provider?.http?.bind(provider);
+  if (!handle) return;
+  app.use("/api/auth", express.json({ limit: "16kb" }), (req, res) => {
+    void respondToAuthRequest(handle, req, res, logger);
   });
 }
 
@@ -873,7 +883,7 @@ export async function createPaseoDaemon(
     createTerminalActivityRouteHandler(terminalManager),
   );
 
-  mountAdmissionLogin(app, config.auth?.admissionProvider, logger);
+  mountAdmissionRoutes(app, config.auth?.admissionProvider, logger);
 
   // Serve the bundled browser web UI when enabled. Mounted after service-proxy
   // classification and host/CORS handling, but before daemon bearer auth, so

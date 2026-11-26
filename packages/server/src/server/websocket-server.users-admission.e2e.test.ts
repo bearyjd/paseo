@@ -18,7 +18,11 @@ class FakeProvider implements AdmissionProvider {
   readonly tokens = new Map<string, AdmittedPrincipal>();
   private listeners = new Set<(event: AdmissionEvent) => void>();
   readonly seen: Array<{ token: string; clientId: string }> = [];
-  login: AdmissionProvider["login"] = async (body) => ({ status: 200, body: { echoed: body } });
+  readonly requests: Array<Parameters<NonNullable<AdmissionProvider["http"]>>[0]> = [];
+  http: AdmissionProvider["http"] = async (request) => {
+    this.requests.push(request);
+    return { status: 200, body: { echoed: request.body, path: request.path } };
+  };
   async authenticate(token: string, context: { clientId: string }) {
     this.seen.push({ token, clientId: context.clientId });
     return this.tokens.get(token) ?? null;
@@ -251,17 +255,25 @@ describe("daemon with an admission provider", () => {
     }
   });
 
-  test("POST /api/auth/login is reachable without the daemon password and delegates to the provider", async () => {
+  test("/api/auth/* is reachable without the operator password and delegates to the provider", async () => {
     const provider = new FakeProvider();
     const daemon = await start(provider);
     try {
-      const response = await fetch(`http://127.0.0.1:${daemon.port}/api/auth/login`, {
+      const response = await fetch(`http://127.0.0.1:${daemon.port}/api/auth/sessions/revoke?x=1`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: "Bearer user-token" },
         body: JSON.stringify({ username: "u" }),
       });
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ echoed: { username: "u" } });
+      expect(await response.json()).toEqual({
+        echoed: { username: "u" },
+        path: "/sessions/revoke",
+      });
+      expect(provider.requests[0]).toMatchObject({
+        method: "POST",
+        path: "/sessions/revoke",
+        headers: { authorization: "Bearer user-token" },
+      });
       // Everything else on /api still needs the operator password.
       expect((await fetch(`http://127.0.0.1:${daemon.port}/api/status`)).status).toBe(401);
     } finally {
@@ -269,7 +281,24 @@ describe("daemon with an admission provider", () => {
     }
   });
 
-  test("without a provider the login route does not exist", async () => {
+  test("a provider failure becomes a generic 500 without leaking the error", async () => {
+    const provider = new FakeProvider();
+    provider.http = async () => {
+      throw new Error("secret internal detail");
+    };
+    const daemon = await start(provider);
+    try {
+      const response = await fetch(`http://127.0.0.1:${daemon.port}/api/auth/login`, {
+        method: "POST",
+      });
+      expect(response.status).toBe(500);
+      expect(JSON.stringify(await response.json())).not.toContain("secret internal detail");
+    } finally {
+      await daemon.close();
+    }
+  });
+
+  test("without a provider /api/auth does not exist", async () => {
     const daemon = await createTestPaseoDaemon({
       auth: { password: await hash(DAEMON_PASSWORD, 4) },
     });

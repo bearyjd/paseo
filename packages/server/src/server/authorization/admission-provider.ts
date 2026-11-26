@@ -30,7 +30,18 @@ export interface AdmissionEvent {
   permissions: readonly DaemonPermission[] | null;
 }
 
-export interface AdmissionLoginResult {
+export interface AdmissionHttpRequest {
+  method: string;
+  /** Path below `/api/auth`, starting with `/`. */
+  path: string;
+  /** Lower-cased header names. */
+  headers: Record<string, string | undefined>;
+  /** Parsed JSON body, or `undefined`. */
+  body: unknown;
+  remoteAddress?: string;
+}
+
+export interface AdmissionHttpResponse {
   status: number;
   body: unknown;
 }
@@ -39,10 +50,12 @@ export interface AdmissionProvider {
   /** Resolve a credential token. `null` rejects. A throw rejects the connection. */
   authenticate(token: string, context: AdmissionContext): Promise<AdmittedPrincipal | null>;
   /**
-   * Pre-authentication login, served at `POST /api/auth/login` without the daemon password.
-   * The provider owns validation, rate limiting and the response body.
+   * Provider-hosted HTTP API, served under `/api/auth/*` without the operator password. The
+   * provider authenticates each request itself (login, logout, account administration) and owns
+   * validation and rate limiting. It runs in the daemon process so the provider is the only
+   * writer of its own state; a plugin process must not write that state.
    */
-  login?(body: unknown, context: { remoteAddress?: string }): Promise<AdmissionLoginResult>;
+  http?(request: AdmissionHttpRequest): Promise<AdmissionHttpResponse>;
   /** The provider calls the listener when a principal's authority changes or is revoked. */
   subscribe(listener: (event: AdmissionEvent) => void): () => void;
 }
