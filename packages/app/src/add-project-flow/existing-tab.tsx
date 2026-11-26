@@ -11,7 +11,7 @@ import { ICON_SIZE, type Theme } from "@/styles/theme";
 import { shortenPath } from "@/utils/shorten-path";
 import type { AddProjectActions } from "./use-add-project-actions";
 import type { AddProjectFlowState, AddProjectHost } from "./model";
-import { directoryQueryFor, pathBaseName } from "./options";
+import { completeDirectoryQuery, directChildPaths, pathBaseName } from "./options";
 import { ResultList, type ResultRow } from "./result-list";
 import { RESULTS_TEST_ID } from "./result-list-id";
 import { useDirectorySearch } from "./searches";
@@ -40,7 +40,11 @@ export function useExistingTab(input: {
   const paths = useMemo(
     () =>
       canAddProject
-        ? buildProjectPickerOptions({ recommendedPaths, serverPaths: search.items, query })
+        ? buildProjectPickerOptions({
+            recommendedPaths,
+            serverPaths: directChildPaths(query, search.items),
+            query,
+          })
         : [],
     [canAddProject, query, recommendedPaths, search.items],
   );
@@ -65,14 +69,11 @@ export function useExistingTab(input: {
     search.pending && state.existing.selectedId === null && paths[0]?.kind !== "path";
   const activeIndex = awaitingRows ? -1 : resolveActiveIndex(rows, state.existing.selectedId);
   const activePath = paths[activeIndex]?.path ?? null;
-  // Tab completes to the active folder, or to the first folder when the typed path is active.
-  const completionPath =
-    awaitingRows || !query.trim()
-      ? null
-      : ((paths[activeIndex]?.kind === "suggestion" ? paths[activeIndex] : undefined)?.path ??
-        paths.find((option) => option.kind === "suggestion")?.path ??
-        null);
-  const completion = completionPath ? directoryQueryFor(completionPath) : null;
+  // Tab completes the way a shell does, from the folders the host found for the typed path.
+  const completion = completeDirectoryQuery(
+    query,
+    paths.flatMap((option) => (option.kind === "suggestion" ? [option.path] : [])),
+  );
 
   return useMemo<AddProjectTabView>(() => {
     const unavailable = canAddProject ? null : "Update the host to add projects";

@@ -85,57 +85,60 @@ function ResultRowView({
 }) {
   const handleOpen = useCallback(() => onOpen?.(index), [index, onOpen]);
   const handlePress = useCallback(() => onSelect(index), [index, onSelect]);
-  const style = useMemo(
-    () => [
-      settingsStyles.row,
-      styles.row,
-      index > 0 && settingsStyles.rowBorder,
-      active && styles.rowActive,
-    ],
+  const frameStyle = useMemo(
+    () => [styles.rowFrame, index > 0 && settingsStyles.rowBorder, active && styles.rowActive],
     [active, index],
   );
   const accessibilityState = useMemo(() => ({ selected: active, disabled }), [active, disabled]);
+  // The open button sits beside the row's press target, not inside it: a button cannot be a
+  // descendant of a button on web.
   return (
-    <PressHighlight
+    <View
       ref={active ? activeItemRef : undefined}
       onLayout={active ? onActiveLayout : undefined}
-      accessibilityRole="button"
-      accessibilityState={accessibilityState}
-      disabled={disabled}
-      onPress={handlePress}
-      // Tabbing to a row picks it, so Enter commits the row that has focus.
-      onFocus={handlePress}
-      style={style}
-      highlightStyle={styles.rowActive}
-      testID={row.testID}
+      style={frameStyle}
     >
-      <View style={styles.iconSlot}>
-        <MutedRowGlyph icon={row.icon} size={16} />
-      </View>
-      <View style={styles.rowText}>
-        <Text style={[settingsStyles.rowTitle, styles.rowTitle]} numberOfLines={1}>
-          {row.title}
-        </Text>
-        {row.subtitle ? (
-          <Text style={styles.rowSubtitle} numberOfLines={1}>
-            {row.subtitle}
+      <PressHighlight
+        accessibilityRole="button"
+        accessibilityState={accessibilityState}
+        disabled={disabled}
+        onPress={handlePress}
+        // Tabbing to a row picks it, so Enter commits the row that has focus.
+        onFocus={handlePress}
+        style={styles.row}
+        highlightStyle={styles.rowActive}
+        testID={row.testID}
+      >
+        <View style={styles.iconSlot}>
+          <MutedRowGlyph icon={row.icon} size={16} />
+        </View>
+        <View style={styles.rowText}>
+          <Text style={[settingsStyles.rowTitle, styles.rowTitle]} numberOfLines={1}>
+            {row.title}
           </Text>
-        ) : null}
-      </View>
-      {/* Reserved on every row so the active row's mark never shifts its text. */}
-      <View style={styles.trailingSlot}>{active ? <ActiveMark /> : null}</View>
+          {row.subtitle ? (
+            <Text style={styles.rowSubtitle} numberOfLines={1}>
+              {row.subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {/* Reserved on every row so the active row's mark never shifts its text. */}
+        <View style={styles.trailingSlot}>{active ? <ActiveMark /> : null}</View>
+      </PressHighlight>
       {row.openable && onOpen ? (
-        <ToolbarButton
-          label={`Open ${row.title}`}
-          onPress={handleOpen}
-          disabled={disabled}
-          compact
-          testID={`${row.testID}-open`}
-        >
-          <MutedRowGlyph icon={ChevronRight} size={16} />
-        </ToolbarButton>
+        <View style={styles.openSlot}>
+          <ToolbarButton
+            label={`Open ${row.title}`}
+            onPress={handleOpen}
+            disabled={disabled}
+            compact
+            testID={`${row.testID}-open`}
+          >
+            <MutedRowGlyph icon={ChevronRight} size={16} />
+          </ToolbarButton>
+        </View>
       ) : null}
-    </PressHighlight>
+    </View>
   );
 }
 
@@ -214,10 +217,22 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
     minHeight: 0,
   },
+  rowFrame: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  openSlot: {
+    paddingRight: theme.spacing[3],
+  },
   // Every row is as tall as a two-line row, so rows without a subtitle do not break the rhythm.
   row: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
     minHeight: theme.spacing[3] * 2 + TITLE_LINE_HEIGHT + SUBTITLE_LINE_HEIGHT,
     paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
     justifyContent: "flex-start",
     gap: theme.spacing[3],
   },

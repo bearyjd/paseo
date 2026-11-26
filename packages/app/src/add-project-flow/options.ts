@@ -17,6 +17,84 @@ export function directoryQueryFor(path: string): string {
   return `${path}${path.includes("\\") && !path.includes("/") ? "\\" : "/"}`;
 }
 
+const toSlashes = (value: string) => value.replace(/\\/g, "/");
+
+interface DirectoryMatch {
+  /** What the user typed up to and including the last separator, kept as typed (`~/`, `C:\\`). */
+  typedParent: string;
+  /** The folder names under the typed parent that start with what follows the last separator. */
+  names: string[];
+  term: string;
+}
+
+/**
+ * The folders in `paths` that sit directly in the folder `query` names and start with its last
+ * segment. The host ranks results fuzzily across the whole tree; completion and browsing need
+ * the shell's reading of a path, so they work from this instead.
+ */
+function matchDirectChildren(query: string, paths: readonly string[]): DirectoryMatch | null {
+  const typed = query.trim();
+  const slashed = toSlashes(typed);
+  const slash = slashed.lastIndexOf("/");
+  if (slash < 0) return null;
+  const parent = slashed.slice(0, slash);
+  const term = slashed.slice(slash + 1);
+  const termLower = term.toLowerCase();
+  // `~` is the host's home, which the app does not know: match the rest of the path and keep
+  // the shallowest hits.
+  const tilde = parent === "~" || parent.startsWith("~/");
+  const parentTail = tilde ? parent.slice(1) : parent;
+  const children = paths.flatMap((path) => {
+    const full = toSlashes(path).replace(/\/+$/, "");
+    const cut = full.lastIndexOf("/");
+    const name = full.slice(cut + 1);
+    const container = full.slice(0, cut);
+    const inside = tilde ? container.endsWith(parentTail) : container === parent;
+    // The typed path is not a candidate for its own completion.
+    const isTyped = full === slashed.replace(/\/+$/, "");
+    const matches =
+      name.length > 0 && inside && !isTyped && name.toLowerCase().startsWith(termLower);
+    return matches ? [{ name, depth: full.split("/").length }] : [];
+  });
+  const shallowest = tilde ? Math.min(...children.map((child) => child.depth)) : null;
+  const names = children
+    .filter((child) => shallowest === null || child.depth === shallowest)
+    .map((child) => child.name);
+  return { typedParent: typed.slice(0, typed.length - term.length), names, term };
+}
+
+/** The server's folders cut down to the ones in the folder a trailing-separator query names. */
+export function directChildPaths(query: string, paths: string[]): string[] {
+  if (!/[\\/]$/.test(query.trim())) return paths;
+  const match = matchDirectChildren(query, paths);
+  if (!match) return paths;
+  return paths.filter((path) => {
+    const name = pathBaseName(path);
+    return match.names.includes(name);
+  });
+}
+
+/**
+ * What Tab types into the field, as a shell would: the shared start of the matching folders, or
+ * the one folder and a separator when a single folder matches. Null when no folder matches.
+ */
+export function completeDirectoryQuery(query: string, paths: readonly string[]): string | null {
+  const match = matchDirectChildren(query, paths);
+  if (!match || match.names.length === 0) return null;
+  const [first, ...rest] = [...new Set(match.names)];
+  if (first === undefined) return null;
+  const separator = query.includes("\\") && !query.includes("/") ? "\\" : "/";
+  if (rest.length === 0) return `${match.typedParent}${first}${separator}`;
+  let shared = first;
+  for (const name of rest) {
+    let length = 0;
+    while (length < shared.length && shared[length] === name[length]) length += 1;
+    shared = shared.slice(0, length);
+  }
+  const name = shared.length > match.term.length ? shared : first + separator;
+  return `${match.typedParent}${name}`;
+}
+
 /** Starts the id of every choice built from what the user typed. */
 export const MANUAL_CHOICE_PREFIX = "manual:";
 
