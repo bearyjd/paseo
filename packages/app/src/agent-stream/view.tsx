@@ -113,6 +113,7 @@ import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store"
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
+import { AppearanceStyleBoundary } from "@/components/appearance-style-boundary";
 import type { Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
 import { useRetainedPanelActive } from "@/components/retained-panel";
@@ -1359,7 +1360,21 @@ function agentStreamViewPropsEqual(
   return reasons.length === 0;
 }
 
-export const AgentStreamView = memo(AgentStreamViewComponent, agentStreamViewPropsEqual);
+// The workspace route is exempt from the stack's appearance remount (see docs/unistyles.md), and
+// on web the message font sizes are baked into generated classes that only a re-render refreshes.
+// Native tracked styles update in place, so only web remounts the timeline.
+const AgentStreamViewWithAppearance = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
+  function AgentStreamViewWithAppearance(props, ref) {
+    if (!isWeb) return <AgentStreamViewComponent ref={ref} {...props} />;
+    return (
+      <AppearanceStyleBoundary>
+        <AgentStreamViewComponent ref={ref} {...props} />
+      </AppearanceStyleBoundary>
+    );
+  },
+);
+
+export const AgentStreamView = memo(AgentStreamViewWithAppearance, agentStreamViewPropsEqual);
 AgentStreamView.displayName = "AgentStreamView";
 
 interface ToolCallSlotProps extends Omit<
